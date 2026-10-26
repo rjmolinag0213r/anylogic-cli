@@ -87,7 +87,7 @@ cli_anything/anylogic/tests/test_full_e2e.py::TestCLISubprocess::test_no_project
 ====================== 56 passed, 1 deselected in 7.25s =======================
 ```
 
-Additional manual check: copies of the user's own course models (SIR, CallCenterPhase5) were
+Additional manual check: copies of real-world SIR and call-center models were
 edited through the installed CLI and diffed against the originals. Only the intended lines changed.
 
 ### Coverage notes
