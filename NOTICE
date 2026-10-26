@@ -1,0 +1,9 @@
+anylogic-cli
+Copyright 2026 rjmolinag0213r
+
+This project follows the CLI-Anything methodology (https://github.com/HKUDS/CLI-Anything).
+cli_anything/anylogic/utils/repl_skin.py is copied from CLI-Anything
+(cli-anything-plugin/repl_skin.py), Copyright HKUDS, licensed under the Apache License 2.0.
+
+AnyLogic is a trademark of The AnyLogic Company. This project is not affiliated with or
+endorsed by The AnyLogic Company.
