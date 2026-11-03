@@ -73,6 +73,15 @@ class Session:
         self.data["project_path"] = path
         self.save()
 
+    # ── AnyLogic edition ─────────────────────────────────────────────
+    @property
+    def edition(self):
+        return self.data.get("edition")
+
+    def set_edition(self, edition):
+        self.data["edition"] = edition
+        self.save()
+
     # ── live API ─────────────────────────────────────────────────────
     @property
     def live(self) -> dict:

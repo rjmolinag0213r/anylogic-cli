@@ -10,6 +10,11 @@ Two channels into the real software:
    model-run errors, inspect model structure and query the built-in
    model database.
 
+Both the Personal Learning and University editions are supported. They ship
+the same Design-Time API; which install the CLI drives is chosen by
+``--edition``, ``ANYLOGIC_EDITION``, ``system use``, ``ANYLOGIC_HOME`` or
+the IDE that is currently running, in that order.
+
 AnyLogic PLE cannot export standalone Java applications, so the running
 IDE is the only engine that can execute a model. The CLI never
 reimplements the simulation engine.
@@ -44,10 +49,14 @@ CONNECT_HINT = (
     "Could not reach the AnyLogic Python API. In the AnyLogic IDE click the toolbar "
     "button 'Enable Python connection' (API icon), copy the token it shows, then run: "
     "cli-anything-anylogic live connect --token <TOKEN>  (or set ANYLOGIC_API_TOKEN). "
-    "Note: the button only exists for some license types - AnyLogic 8.9.10 Personal Learning "
-    "Edition does not show it, so live commands are unavailable there; run models with the "
-    "IDE's Run button instead."
+    "Note: the button only exists for some license types - AnyLogic 8.9.10 University shows it, "
+    "Personal Learning Edition does not, so live commands are unavailable there; run models "
+    "with the IDE's Run button instead."
 )
+
+EDITIONS = ("personal", "university")
+
+_preferred_edition = None
 
 
 class AnyLogicNotFound(RuntimeError):
@@ -68,23 +77,81 @@ def _exe_in(folder: str):
     return None
 
 
-def _edition_rank(path: str) -> int:
-    # Prefer PLE (this harness targets it) over other editions.
-    return 0 if "Personal Learning" in path else 1
+def edition_of(path: str) -> str:
+    """Short edition name of an install folder: personal, university or other."""
+    name = os.path.basename(os.path.normpath(path)).lower()
+    if "personal learning" in name:
+        return "personal"
+    if "university" in name:
+        return "university"
+    return "other"
+
+
+def set_preferred_edition(edition: str = None):
+    """Make every install lookup in this process favour one edition."""
+    global _preferred_edition
+    if edition and edition not in EDITIONS:
+        raise ValueError(f"Unknown edition '{edition}'. Choose from: {', '.join(EDITIONS)}")
+    _preferred_edition = edition or None
+
+
+def running_homes() -> list:
+    """Install folders of the AnyLogic IDEs running right now."""
+    if sys.platform != "win32" or not is_ide_running():
+        return []
+    query = "(Get-CimInstance Win32_Process -Filter \"Name='AnyLogic.exe'\").ExecutablePath"
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", query],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [os.path.dirname(line.strip()) for line in r.stdout.splitlines() if line.strip()]
+
+
+def running_edition():
+    """Edition of the running IDE, or None when no IDE is running."""
+    homes = running_homes()
+    return edition_of(homes[0]) if homes else None
+
+
+def gateway_edition(port: int = DEFAULT_PORT):
+    """Edition of the IDE listening on the live API port; both editions may be open at once."""
+    query = (f"$p = (Get-NetTCPConnection -LocalPort {int(port)} -State Listen).OwningProcess; "
+             "if ($p) { (Get-Process -Id $p).Path }")
+    if sys.platform == "win32":
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", query],
+                               capture_output=True, text=True, timeout=30)
+            path = r.stdout.strip()
+            if path:
+                return edition_of(os.path.dirname(path.splitlines()[0]))
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return running_edition()
+
+
+def _install_rank(path: str, env_home, running: list) -> int:
+    # Explicit choice, then ANYLOGIC_HOME, then the IDE in use, then PLE.
+    if _preferred_edition and edition_of(path) == _preferred_edition:
+        return 0
+    if env_home and path == env_home:
+        return 1
+    if path in running:
+        return 2
+    return 3 if edition_of(path) == "personal" else 4
 
 
 def find_installs() -> list:
     """Return every AnyLogic install found, best candidate first."""
-    found = []
-    env = os.environ.get("ANYLOGIC_HOME")
-    if env and _exe_in(env):
-        found.append(os.path.abspath(env))
     candidates = set()
+    env = os.environ.get("ANYLOGIC_HOME")
+    env_home = os.path.abspath(env) if env and _exe_in(env) else None
+    if env_home:
+        candidates.add(env_home)
     for pattern in _INSTALL_GLOBS:
-        candidates.update(glob.glob(pattern))
-    for c in sorted(candidates, key=lambda p: (_edition_rank(p), p)):
-        if _exe_in(c) and os.path.abspath(c) not in found:
-            found.append(os.path.abspath(c))
+        candidates.update(os.path.abspath(c) for c in glob.glob(pattern) if _exe_in(c))
+    running = [os.path.abspath(h) for h in running_homes()]
+    found = sorted(candidates, key=lambda p: (_install_rank(p, env_home, running), p))
     on_path = shutil.which("AnyLogic") or shutil.which("anylogic")
     if on_path:
         d = os.path.dirname(os.path.abspath(on_path))
@@ -98,13 +165,25 @@ def find_anylogic() -> str:
     installs = find_installs()
     if not installs:
         raise AnyLogicNotFound(INSTALL_HINT)
+    if _preferred_edition and edition_of(installs[0]) != _preferred_edition:
+        raise AnyLogicNotFound(f"AnyLogic {_preferred_edition} edition is not installed. "
+                               f"Found: {installs}")
     return installs[0]
 
 
-def install_info(home: str = None) -> dict:
-    home = home or find_anylogic()
-    info = {"home": home, "executable": _exe_in(home), "edition": None, "version": None,
-            "design_time_api": os.path.isdir(os.path.join(home, "anylogic_design_time_api"))}
+def list_editions() -> list:
+    """Every install with its edition, version and whether its IDE is running."""
+    running = [os.path.abspath(h) for h in running_homes()]
+    installs = find_installs()
+    rows = []
+    for i, home in enumerate(installs):
+        rows.append({"edition": edition_of(home), "version": _read_product(home)["version"],
+                     "selected": i == 0, "running": home in running, "home": home})
+    return rows
+
+
+def _read_product(home: str) -> dict:
+    info = {"edition": None, "version": None}
     product = os.path.join(home, ".eclipseproduct")
     if os.path.isfile(product):
         with open(product, encoding="utf-8", errors="replace") as f:
@@ -113,8 +192,16 @@ def install_info(home: str = None) -> dict:
                     info["edition"] = line.split("=", 1)[1].strip()
                 elif line.startswith("version="):
                     info["version"] = line.split("=", 1)[1].strip()
+    return info
+
+
+def install_info(home: str = None) -> dict:
+    home = home or find_anylogic()
+    info = {"home": home, "executable": _exe_in(home), **_read_product(home),
+            "design_time_api": os.path.isdir(os.path.join(home, "anylogic_design_time_api"))}
     info["examples_dir"] = examples_dir(home)
     info["ide_running"] = is_ide_running()
+    info["running_edition"] = running_edition()
     return info
 
 
@@ -155,7 +242,7 @@ def open_in_ide(alp_path: str, home: str = None) -> dict:
     else:
         kwargs["start_new_session"] = True
     proc = subprocess.Popen([exe, alp_path], **kwargs)
-    return {"opened": alp_path, "executable": exe, "pid": proc.pid,
+    return {"opened": alp_path, "executable": exe, "edition": edition_of(home), "pid": proc.pid,
             "ide_was_running": was_running, "method": "anylogic-ide"}
 
 
@@ -211,7 +298,10 @@ class LiveConnection:
         try:
             return fn(*args)
         except self._Py4JError as e:
-            msg = str(e).strip()
+            root = getattr(e, "java_exception", None)
+            while root is not None and root.getCause() is not None:
+                root = root.getCause()
+            msg = str(root.toString() if root is not None else e).strip()
             raise LiveApiError(msg.splitlines()[0] if msg else repr(e)) from e
 
     @staticmethod
@@ -269,8 +359,12 @@ class LiveConnection:
         return _maybe_json(self._call(self.elements.getModelStructure, self._agent(model, agent)))
 
     def blocks(self, model: str, agent: str) -> list:
+        # getBlocks returned nothing on real 8.9.10 models; blocks are EmbeddedObject children.
+        return [c for c in self.children(model, agent) if c["type"] == "EmbeddedObject"]
+
+    def children(self, model: str, agent: str) -> list:
         a = self._agent(model, agent)
-        return [self.describe(b) for b in self._call(self.elements.getBlocks, a) or []]
+        return [self.describe(c) for c in self._call(self.elements.getChildren, a) or []]
 
     def get_property(self, model: str, agent: str, element: str, prop: str):
         return _plain(self._call(self.props.getPropertyValue, self._element(model, agent, element), prop))

@@ -8,6 +8,7 @@ from cli_anything.anylogic.core import elements as el
 from cli_anything.anylogic.core import experiments as ex
 from cli_anything.anylogic.core import project as pr
 from cli_anything.anylogic.core.session import Session
+from cli_anything.anylogic.utils import anylogic_backend as backend
 
 MINI = """<?xml version="1.0" encoding="UTF-8"?>
 <!-- AnyLogic Project File -->
@@ -390,3 +391,78 @@ class TestSession:
         s.set_project(str(tmp_path / "other.alp"))
         assert Session().history() == []
         assert os.listdir(str(tmp_path / "state4" / "snapshots")) == []
+
+
+class TestEditions:
+    @pytest.fixture
+    def installs(self, tmp_path, monkeypatch):
+        homes = {}
+        for key, name in (("personal", "AnyLogic 8.9 Personal Learning Edition"),
+                          ("university", "AnyLogic 8.9 University")):
+            home = tmp_path / name
+            home.mkdir()
+            (home / "AnyLogic.exe").write_text("")
+            homes[key] = str(home)
+        monkeypatch.setattr(backend, "_INSTALL_GLOBS", [str(tmp_path / "AnyLogic *")])
+        monkeypatch.setattr(backend, "running_homes", lambda: [])
+        monkeypatch.setattr(backend.shutil, "which", lambda name: None)
+        monkeypatch.delenv("ANYLOGIC_HOME", raising=False)
+        monkeypatch.delenv("ANYLOGIC_EDITION", raising=False)
+        monkeypatch.setenv("CLI_ANYTHING_ANYLOGIC_HOME", str(tmp_path / "state"))
+        monkeypatch.setattr(backend, "_preferred_edition", None)
+        return homes
+
+    def test_edition_of(self):
+        assert backend.edition_of("/x/AnyLogic 8.9 University") == "university"
+        assert backend.edition_of("/x/AnyLogic 8.9 Personal Learning Edition") == "personal"
+        assert backend.edition_of("/x/AnyLogic 8.9 Professional") == "other"
+
+    def test_default_is_personal(self, installs):
+        assert backend.find_anylogic() == installs["personal"]
+
+    def test_follows_running_ide(self, installs, monkeypatch):
+        monkeypatch.setattr(backend, "running_homes", lambda: [installs["university"]])
+        assert backend.find_anylogic() == installs["university"]
+
+    def test_explicit_choice_beats_running_ide(self, installs, monkeypatch):
+        monkeypatch.setattr(backend, "running_homes", lambda: [installs["university"]])
+        backend.set_preferred_edition("personal")
+        assert backend.find_anylogic() == installs["personal"]
+
+    def test_anylogic_home_beats_running_ide(self, installs, monkeypatch):
+        monkeypatch.setattr(backend, "running_homes", lambda: [installs["personal"]])
+        monkeypatch.setenv("ANYLOGIC_HOME", installs["university"])
+        assert backend.find_anylogic() == installs["university"]
+
+    def test_missing_edition_is_an_error(self, installs, monkeypatch):
+        monkeypatch.setattr(backend, "_INSTALL_GLOBS", [installs["personal"]])
+        backend.set_preferred_edition("university")
+        with pytest.raises(backend.AnyLogicNotFound):
+            backend.find_anylogic()
+
+    def test_unknown_edition_rejected(self):
+        with pytest.raises(ValueError):
+            backend.set_preferred_edition("student")
+
+    def test_list_editions_marks_selected_and_running(self, installs, monkeypatch):
+        monkeypatch.setattr(backend, "running_homes", lambda: [installs["university"]])
+        rows = {r["edition"]: r for r in backend.list_editions()}
+        assert rows["university"]["selected"] and rows["university"]["running"]
+        assert not rows["personal"]["selected"] and not rows["personal"]["running"]
+
+    def test_system_use_persists_and_auto_clears(self, installs):
+        from click.testing import CliRunner
+        from cli_anything.anylogic.anylogic_cli import cli
+        run = CliRunner().invoke
+        assert run(cli, ["system", "use", "university"]).exit_code == 0
+        assert Session().edition == "university"
+        assert f"home: {installs['university']}" in run(cli, ["system", "info"]).output
+        assert run(cli, ["system", "use", "auto"]).exit_code == 0
+        assert Session().edition is None
+
+    def test_edition_flag_overrides_saved_choice(self, installs):
+        from click.testing import CliRunner
+        from cli_anything.anylogic.anylogic_cli import cli
+        Session().set_edition("university")
+        result = CliRunner().invoke(cli, ["--edition", "personal", "system", "info"])
+        assert f"home: {installs['personal']}" in result.output

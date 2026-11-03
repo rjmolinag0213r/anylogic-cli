@@ -1,6 +1,6 @@
 ---
 name: "cli-anything-anylogic"
-description: "Inspect, edit and run AnyLogic simulation models (.alp) from the command line: parameters, stocks/flows, process blocks, statecharts, experiments, plus running models in the real AnyLogic IDE via its Design-Time Python API. Works with AnyLogic 8.9 Personal Learning Edition."
+description: "Inspect, edit and run AnyLogic simulation models (.alp) from the command line: parameters, stocks/flows, process blocks, statecharts, experiments, plus running models in the real AnyLogic IDE via its Design-Time Python API. Works with AnyLogic 8.9 Personal Learning and University editions."
 ---
 
 # cli-anything-anylogic
@@ -10,7 +10,7 @@ Always put `--json` first when you parse output: `cli-anything-anylogic --json v
 Errors print `{"error": ..., "type": ...}` and exit 1.
 
 ## Prerequisites
-- AnyLogic 8.9+ installed (auto-detected; else set `ANYLOGIC_HOME`).
+- AnyLogic 8.9+ installed (auto-detected; choose with `--edition personal|university` or `system use`; else set `ANYLOGIC_HOME`).
 - For running models: AnyLogic open, with **Enable Python connection** clicked; the user gives you the token.
   This button is NOT available in AnyLogic 8.9.10 PLE; there, edit files and ask the user to press Run in the IDE (`ide open` opens the model).
 

@@ -2,7 +2,7 @@
 """AnyLogic CLI - a stateful command-line interface for AnyLogic models.
 
 Edits real AnyLogic project files (.alp) and drives the real AnyLogic IDE
-(Personal Learning Edition works) through its Design-Time Python API.
+(Personal Learning and University editions) through its Design-Time Python API.
 
 Usage:
     # One-shot commands
@@ -165,13 +165,16 @@ agent_option = click.option("--agent", "-a", default=None,
 @click.option("--json", "use_json", is_flag=True, help="Machine-readable JSON output")
 @click.option("--project", "-p", "project_path", type=click.Path(), default=None,
               help="Model file (.alp) to operate on; defaults to the session's model")
+@click.option("--edition", type=click.Choice(backend.EDITIONS), envvar="ANYLOGIC_EDITION", default=None,
+              help="AnyLogic edition to use; defaults to 'system use', then the running IDE")
 @click.version_option(__version__, prog_name="cli-anything-anylogic")
 @click.pass_context
-def cli(ctx, use_json, project_path):
+def cli(ctx, use_json, project_path, edition):
     """AnyLogic CLI - edit .alp models and drive the AnyLogic IDE from the terminal."""
     global _json_output, _project_override
     _json_output = use_json
     _project_override = os.path.abspath(project_path) if project_path else None
+    backend.set_preferred_edition(edition or Session().edition)
     if ctx.invoked_subcommand is None:
         ctx.invoke(repl, project_path=project_path)
 
@@ -190,6 +193,25 @@ def system_info():
     info = backend.install_info()
     info["all_installs"] = backend.find_installs()
     output(info)
+
+
+@system.command("editions")
+@handle_errors
+def system_editions():
+    """List installed AnyLogic editions and which one this CLI is using."""
+    output(backend.list_editions())
+
+
+@system.command("use")
+@click.argument("edition", type=click.Choice(backend.EDITIONS + ("auto",)))
+@handle_errors
+def system_use(edition):
+    """Remember which edition to use ('auto' follows the running IDE)."""
+    choice = None if edition == "auto" else edition
+    backend.set_preferred_edition(choice)
+    home = backend.find_anylogic()
+    Session().set_edition(choice)
+    output({"edition": edition, "home": home}, f"Using AnyLogic edition: {edition}")
 
 
 @system.command("examples")
@@ -579,7 +601,8 @@ def ide_open(path):
 @handle_errors
 def ide_status():
     """Is the AnyLogic IDE running?"""
-    output({"running": backend.is_ide_running(), "home": backend.find_anylogic()})
+    output({"running": backend.is_ide_running(), "running_edition": backend.running_edition(),
+            "home": backend.find_anylogic()})
 
 
 # ── live (Design-Time Python API inside the running IDE) ─────────────
@@ -630,7 +653,8 @@ def live_connect(token, port):
         models = c.list_models()
         port_used = c.port
     Session().set_live(token=tok, port=port_used)
-    output({"connected": True, "port": port_used, "open_models": models}, "Connected to AnyLogic")
+    output({"connected": True, "port": port_used, "ide_edition": backend.gateway_edition(port_used),
+            "open_models": models}, "Connected to AnyLogic")
 
 
 @live.command("disconnect")
@@ -647,10 +671,11 @@ def live_status():
     """Check the connection and list open models."""
     try:
         with _conn() as c:
-            output({"connected": True, "port": c.port, "open_models": c.list_models()})
+            output({"connected": True, "port": c.port, "ide_edition": backend.gateway_edition(c.port),
+                    "open_models": c.list_models()})
     except backend.LiveApiError as e:
         output({"connected": False, "reason": str(e).splitlines()[0],
-                "ide_running": backend.is_ide_running()})
+                "ide_running": backend.is_ide_running(), "ide_edition": backend.running_edition()})
 
 
 @live.command("models")
@@ -700,6 +725,26 @@ def live_structure(agent_name, model):
     """The IDE's own description of an agent's structure."""
     with _conn() as c:
         output(c.structure(_live_model(model), _live_agent(agent_name)))
+
+
+@live.command("blocks")
+@agent_option
+@model_option
+@handle_errors
+def live_blocks(agent, model):
+    """Process-library blocks in an agent, as seen by the IDE."""
+    with _conn() as c:
+        output(c.blocks(_live_model(model), _live_agent(agent)))
+
+
+@live.command("children")
+@agent_option
+@model_option
+@handle_errors
+def live_children(agent, model):
+    """All elements directly inside an agent, as seen by the IDE."""
+    with _conn() as c:
+        output(c.children(_live_model(model), _live_agent(agent)))
 
 
 @live.command("run")
