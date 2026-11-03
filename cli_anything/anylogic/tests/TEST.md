@@ -94,4 +94,9 @@ edited through the installed CLI and diffed against the originals. Only the inte
 - The live-engine test **could not be run**: AnyLogic 8.9.10 PLE does not show the
   "Enable Python connection" button (confirmed from a screenshot of the real install; the
   button is gated by a license-type check in AnyLogic's code). It applies to editions that have it.
+- AnyLogic 8.9.10 University does show the button, and the read-only `live` commands were checked
+  against it. `live run` launched SIR/Simulation there with no reported errors.
+- Known limits on 8.9.10: `live get` fails with ElementNotFoundException on EmbeddedObject blocks, and
+  the IDE returned "Model element Main was not found" for `live structure`. `live stop`, `live set` and
+  live control on Personal Learning Edition are untested.
 - Opening an edited model in the AnyLogic GUI to confirm it loads is part of the live test.

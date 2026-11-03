@@ -26,6 +26,18 @@ cli-anything-anylogic --help
 Requirements: Python 3.10+, AnyLogic 8.9+. The CLI auto-detects
 `C:\Program Files\AnyLogic 8.9 Personal Learning Edition`; set `ANYLOGIC_HOME` to override.
 
+### Personal and University editions
+
+Both editions are supported, and they ship the same Design-Time API. The CLI uses, in order:
+`--edition` (or `ANYLOGIC_EDITION`), the choice saved with `system use`, `ANYLOGIC_HOME`, the IDE
+that is running now, then Personal Learning Edition.
+
+```bash
+cli-anything-anylogic system editions            # what is installed, selected and running
+cli-anything-anylogic system use university      # remember a choice ("auto" clears it)
+cli-anything-anylogic --edition personal ide open model.alp
+```
+
 ## Quick start
 
 ```bash
@@ -57,7 +69,8 @@ Add `--json` before the command for machine-readable output. Run with no argumen
 > **License note:** the *Enable Python connection* toolbar button (Python logo) only appears for
 > some AnyLogic license types. It is **not present in AnyLogic 8.9.10 Personal Learning Edition**
 > (checked on a real install). With PLE, use the file-editing commands, then `ide open` and press
-> AnyLogic's Run button yourself. The `live` commands work on editions that show the button.
+> AnyLogic's Run button yourself. The `live` commands work on editions that show the button,
+> including AnyLogic 8.9.10 University (checked on a real install).
 
 1. Open AnyLogic and click **Enable Python connection** (API icon). Copy the token it shows.
 2. Then:
